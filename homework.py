@@ -1,14 +1,12 @@
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import time
 import sys
-
-import requests
 from http import HTTPStatus
 
+import requests
 import telegram
-import telegram.ext
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,14 +26,20 @@ HOMEWORK_VERDICTS = {
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    filename='program.log',
-    filemode='w',
-    format='%(asctime)s - %(levelname)s - %(message)s - %(name)s'
-)
+
+class APIError(Exception):
+    """API ошибка."""
+
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = RotatingFileHandler('program.log', maxBytes=50000000, backupCount=5)
 logger.addHandler(logging.StreamHandler())
+formatter = logging.Formatter(
+    '%(asctime)s - %(levelname)s - %(message)s - %(name)s'
+)
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 
 def check_tokens():
@@ -46,10 +50,11 @@ def check_tokens():
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
     }
     for token, value in tokens.items():
-        if value is None:
+        if value:
+            return tokens.values()
+        else:
             logger.critical(f'{token} не найден')
             sys.exit()
-    return all(tokens.values())
 
 
 def send_message(bot, message):
@@ -59,8 +64,6 @@ def send_message(bot, message):
         logger.debug(f'Сообщение доставлено {message}')
     except telegram.TelegramError as error:
         logger.error(f'Сообщение не доставлено {error}')
-    finally:
-        logger.debug(f'Сообщение доставлено {message}')
 
 
 def get_api_answer(timestamp):
@@ -68,20 +71,19 @@ def get_api_answer(timestamp):
     payload = {'form_data': timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
-    except Exception as error:
-        raise error('Ошибка API')
+    except Exception:
+        raise APIError('API неправельный')
     if response.status_code != HTTPStatus.OK:
-        logging.error('Код статуса не равен 200')
-        raise TypeError
+        raise APIError('Эндпоинт не отвечает')
     return response.json()
 
 
 def check_response(response):
     """Проверка API на соответсвие."""
     if not isinstance(response, dict):
-        raise TypeError('Неверный тип данных')
+        raise TypeError('Неверный тип данных у объекта response')
     elif "homeworks" not in response:
-        raise TypeError('В ответе homeworks отсутсвует')
+        raise KeyError('В ответе homeworks отсутсвует')
     elif not isinstance(response["homeworks"], list):
         raise TypeError('Неверный тип данных у элемента homeworks')
     return response.get("homeworks")
@@ -92,11 +94,11 @@ def parse_status(homework):
     homework_name = homework.get('homework_name')
     status = homework.get('status')
     if status is None:
-        raise TypeError('Пустой статус')
+        raise KeyError('Пустой статус')
     if homework_name is None:
-        raise TypeError('Нет имени работы')
+        raise KeyError('Нет имени работы')
     if status not in HOMEWORK_VERDICTS:
-        raise KeyError('Неверный статус')
+        raise KeyError('У домашней работы отсутсвует статус')
     verdict = HOMEWORK_VERDICTS.get(homework.get('status'))
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
@@ -104,16 +106,16 @@ def parse_status(homework):
 def main():
     """Основная логика работы бота."""
     logger.info('Проверка токена')
-    if not check_tokens():
-        logger.critical('Токенов нет')
-        sys.exit()
+    check_tokens()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    last_error = ''
+    last_message_error = ''
     last_message = ''
     while True:
         try:
+            timestamp = int(time.time())
             response = get_api_answer(timestamp)
+            logging.error('Код статуса не равен 200')
             homeworks = check_response(response)
             if not homeworks:
                 message = 'Отсутсвует домашняя работа'
@@ -124,9 +126,9 @@ def main():
                 last_message = message
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            if last_error != error:
+            if last_message_error != message:
                 send_message(bot, message)
-                last_error = error
+                last_message_error = message
             logger.exception(message)
         finally:
             time.sleep(RETRY_PERIOD)
