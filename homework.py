@@ -9,6 +9,7 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
+from exceptions import APIError
 load_dotenv()
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
@@ -25,11 +26,6 @@ HOMEWORK_VERDICTS = {
     'reviewing': 'Работа взята на проверку ревьюером.',
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
-
-
-class APIError(Exception):
-    """API ошибка."""
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -50,9 +46,7 @@ def check_tokens():
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
     }
     for token, value in tokens.items():
-        if value:
-            return tokens.values()
-        else:
+        if value is None:
             logger.critical(f'{token} не найден')
             sys.exit()
 
@@ -72,16 +66,23 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
     except Exception:
-        raise APIError('API неправельный')
+        raise APIError(
+            f'API неправельный,'
+            f'проверьте эндпоинт-{ENDPOINT},хэдер-{HEADERS} или дату-{payload}'
+        )
     if response.status_code != HTTPStatus.OK:
-        raise APIError('Эндпоинт не отвечает')
+        raise APIError(
+            f'Эндпоинт не отвечает, статус ошибки: {response.status_code}'
+        )
     return response.json()
 
 
 def check_response(response):
     """Проверка API на соответсвие."""
     if not isinstance(response, dict):
-        raise TypeError('Неверный тип данных у объекта response')
+        raise TypeError(
+            f'Неверный тип данных у объекта response, тип {type(response)}'
+        )
     elif "homeworks" not in response:
         raise KeyError('В ответе homeworks отсутсвует')
     elif not isinstance(response["homeworks"], list):
@@ -98,7 +99,7 @@ def parse_status(homework):
     if homework_name is None:
         raise KeyError('Нет имени работы')
     if status not in HOMEWORK_VERDICTS:
-        raise KeyError('У домашней работы отсутсвует статус')
+        raise KeyError(f'Статус домашней работы неврен,пришёл статус:{status}')
     verdict = HOMEWORK_VERDICTS.get(homework.get('status'))
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
@@ -113,9 +114,7 @@ def main():
     last_message = ''
     while True:
         try:
-            timestamp = int(time.time())
             response = get_api_answer(timestamp)
-            logging.error('Код статуса не равен 200')
             homeworks = check_response(response)
             if not homeworks:
                 message = 'Отсутсвует домашняя работа'
@@ -123,12 +122,15 @@ def main():
                 message = parse_status(homeworks[0])
             if last_message != message:
                 send_message(bot, message)
-                last_message = message
+                if send_message():
+                    last_message = message
+            timestamp = response.get('current_date')
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             if last_message_error != message:
                 send_message(bot, message)
-                last_message_error = message
+                if send_message():
+                    last_message_error = message
             logger.exception(message)
         finally:
             time.sleep(RETRY_PERIOD)
