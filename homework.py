@@ -46,7 +46,7 @@ def check_tokens():
         'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
     }
     for token, value in tokens.items():
-        if value is None:
+        if not value:
             logger.critical(f'{token} не найден')
             sys.exit()
 
@@ -58,6 +58,7 @@ def send_message(bot, message):
         logger.debug(f'Сообщение доставлено {message}')
     except telegram.TelegramError as error:
         logger.error(f'Сообщение не доставлено {error}')
+        raise error(f'Сообщение не доставлено {error}')
 
 
 def get_api_answer(timestamp):
@@ -85,6 +86,8 @@ def check_response(response):
         )
     elif "homeworks" not in response:
         raise KeyError('В ответе homeworks отсутсвует')
+    elif "current_date" not in response:
+        raise KeyError('В ответе current_date отсутсвует')
     elif not isinstance(response["homeworks"], list):
         raise TypeError('Неверный тип данных у элемента homeworks')
     return response.get("homeworks")
@@ -122,15 +125,13 @@ def main():
                 message = parse_status(homeworks[0])
             if last_message != message:
                 send_message(bot, message)
-                if send_message():
-                    last_message = message
-            timestamp = response.get('current_date')
+                last_message = message
+                timestamp = response.get('current_date')
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             if last_message_error != message:
                 send_message(bot, message)
-                if send_message():
-                    last_message_error = message
+                last_message_error = message
             logger.exception(message)
         finally:
             time.sleep(RETRY_PERIOD)
