@@ -9,7 +9,8 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
-from exceptions import APIError
+from exceptions import APIError, SendMessageError
+
 load_dotenv()
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
@@ -19,7 +20,6 @@ TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
 RETRY_PERIOD = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
-
 
 HOMEWORK_VERDICTS = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
@@ -58,7 +58,7 @@ def send_message(bot, message):
         logger.debug(f'Сообщение доставлено {message}')
     except telegram.TelegramError as error:
         logger.error(f'Сообщение не доставлено {error}')
-        raise error(f'Сообщение не доставлено {error}')
+        raise SendMessageError(f'Сообщение не доставлено {error}')
 
 
 def get_api_answer(timestamp):
@@ -130,7 +130,10 @@ def main():
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             if last_message_error != message:
-                send_message(bot, message)
+                try:
+                    send_message(bot, message)
+                except SendMessageError as error_2:
+                    print(f'Сообщение не было доставлено, причина: {error_2}')
                 last_message_error = message
             logger.exception(message)
         finally:
