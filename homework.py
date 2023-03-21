@@ -132,9 +132,9 @@ def main():
             if last_message_error != message:
                 try:
                     send_message(bot, message)
-                except SendMessageError as error_2:
-                    print(f'Сообщение не было доставлено, причина: {error_2}')
-                last_message_error = message
+                    last_message_error = message
+                except SendMessageError:
+                    pass
             logger.exception(message)
         finally:
             time.sleep(RETRY_PERIOD)
